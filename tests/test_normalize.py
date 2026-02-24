@@ -137,8 +137,7 @@ def test_normalize_row_missing_time_error():
     norm_row, errors = normalize_row(2, row)
     
     assert norm_row is None
-    assert len(errors) == 1
-    assert "time_missing" in errors[0].reason
+    assert errors == []  # 時間欠損の判定は validate が担当（normalize は追加エラーを出さない）
 
 
 def test_normalize_row_invalid_start_format():

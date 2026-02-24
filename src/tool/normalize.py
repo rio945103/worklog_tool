@@ -114,8 +114,9 @@ def normalize_row(row_number: int, row: dict[str, str]) -> tuple[NormalizedRow |
     end = (row.get("end") or "").strip()
     
     if not start or not end:
-        errors.append(RowError(row_number, "time_missing: provide start+end OR minutes", row))
-        return None, errors
+        # ここは validate_time_rules() が責務を持つ
+        # build側で理由の異なるエラーを追加しないため、黙ってスキップする
+        return None, []
     
     smin = _parse_hhmm_to_minutes(start)
     emin = _parse_hhmm_to_minutes(end)
