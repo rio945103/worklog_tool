@@ -53,7 +53,7 @@ def run_build(input_csv: Path, out_dir: Path) -> int:
     # 有効行が0でも、空のサマリを出す（落とさない）
     _export_summary_daily(summary_daily_csv, normalized)
     _export_summary_process(summary_process_csv, normalized)
-    _export_html(report_html, normalized)
+    _export_html(report_html, normalized, errors)
 
     logger.info(
         f"build: rows={len(rows)} valid={len(normalized)} errors={len(errors)} "
@@ -113,8 +113,7 @@ def _export_summary_process(path: Path, items: list[NormalizedRow]) -> None:
             w.writerow([process, a["count"], a["sum"], avg, a["max"]])
 
 
-def _export_html(path: Path, items: list[NormalizedRow]) -> None:
-    # 最小HTML（テーブル2つ）
+def _export_html(path: Path, items: list[NormalizedRow], errors: list[RowError]) -> None:
     # daily
     daily_totals: dict[str, int] = {}
     daily_counts: dict[str, int] = {}
@@ -129,11 +128,23 @@ def _export_html(path: Path, items: list[NormalizedRow]) -> None:
         proc_totals[r.process] = proc_totals.get(r.process, 0) + r.minutes
         proc_counts[r.process] = proc_counts.get(r.process, 0) + 1
 
-    html = []
+    html: list[str] = []
     html.append("<!doctype html><html><head><meta charset='utf-8'>")
     html.append("<title>Worklog Report</title></head><body>")
     html.append("<h1>Worklog Report</h1>")
     html.append(f"<p>valid rows: {len(items)}</p>")
+
+    # errors summary
+    html.append("<h2>Errors</h2>")
+    html.append(f"<p>errors: {len(errors)}</p>")
+    if errors:
+        html.append("<table border='1' cellpadding='4' cellspacing='0'>")
+        html.append("<tr><th>row_number</th><th>reason</th></tr>")
+        for e in errors[:10]:
+            html.append(f"<tr><td>{e.row_number}</td><td>{e.reason}</td></tr>")
+        html.append("</table>")
+        if len(errors) > 10:
+            html.append("<p>(showing first 10)</p>")
 
     html.append("<h2>Daily Summary</h2>")
     html.append("<table border='1' cellpadding='4' cellspacing='0'>")
