@@ -116,23 +116,37 @@ def write_errors_csv(path: Path, errors: Iterable[RowError]) -> None:
 def run_validate(input_csv: Path, errors_csv: Path) -> int:
     logger.info(f"validate: start input={input_csv}")
 
-    rows = read_csv_utf8(input_csv)
+    try:
+        rows = read_csv_utf8(input_csv)
 
-    errors: list[RowError] = []
-    errors.extend(validate_required_columns(rows))
-    errors.extend(validate_time_rules(rows))
+        errors: list[RowError] = []
+        errors.extend(validate_required_columns(rows))
+        errors.extend(validate_time_rules(rows))
 
-    write_errors_csv(errors_csv, errors)
+        write_errors_csv(errors_csv, errors)
 
-    logger.info(f"validate: rows={len(rows)} errors={len(errors)} errors_csv={errors_csv}")
+        logger.info(f"validate: rows={len(rows)} errors={len(errors)} errors_csv={errors_csv}")
 
-    if errors:
-        print(f"INVALID: {len(errors)} error(s). -> {errors_csv}")
-        logger.info("validate: finished status=INVALID")
+        if errors:
+            print(f"INVALID: {len(errors)} error(s). -> {errors_csv}")
+            logger.info("validate: finished status=INVALID")
+            return 2
+
+        print("VALID: no errors.")
+        logger.info("validate: finished status=VALID")
+        return 0
+
+    except Exception as e:
+        # ファイルレベルの致命的エラーでも落とさない
+        file_error = RowError(
+            row_number=0,
+            reason=f"file_error: {type(e).__name__}: {e}",
+            raw={"input": str(input_csv)},
+        )
+        write_errors_csv(errors_csv, [file_error])
+
+        logger.exception(f"validate: file_error input={input_csv}")
+        print(f"INVALID: file_error -> {errors_csv}")
         return 2
-
-    print("VALID: no errors.")
-    logger.info("validate: finished status=VALID")
-    return 0
 
 
