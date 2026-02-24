@@ -3,54 +3,12 @@ from __future__ import annotations
 
 import csv
 import logging
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
+from .normalize import NormalizedRow, normalize_row
 from .validate import RowError, read_csv_utf8, validate_required_columns, validate_time_rules, write_errors_csv
 
 logger = logging.getLogger("worklog_tool")
-
-
-@dataclass
-class NormalizedRow:
-    date: str
-    process: str
-    operator: str
-    minutes: int
-    note: str
-
-
-def _parse_date_yyyy_mm_dd(s: str) -> bool:
-    s = (s or "").strip()
-    try:
-        datetime.strptime(s, "%Y-%m-%d")
-        return True
-    except ValueError:
-        return False
-
-
-def _parse_minutes(s: str) -> int | None:
-    s = (s or "").strip()
-    if not s:
-        return None
-    if not s.isdigit():
-        return -1
-    return int(s)
-
-
-def _parse_hhmm_to_minutes(s: str) -> int | None:
-    s = (s or "").strip()
-    if len(s) != 5 or s[2] != ":":
-        return None
-    hh, mm = s.split(":")
-    if not (hh.isdigit() and mm.isdigit()):
-        return None
-    h = int(hh)
-    m = int(mm)
-    if not (0 <= h <= 23 and 0 <= m <= 59):
-        return None
-    return h * 60 + m
 
 
 def _row_has_error(row_number: int, errors: list[RowError]) -> bool:
@@ -76,46 +34,18 @@ def run_build(input_csv: Path, out_dir: Path) -> int:
 
     normalized: list[NormalizedRow] = []
 
-    # 追加チェック（buildに必要な最小：date形式、minutes算出、start<=end）
+    # 正規化処理（normalize_rowで統一）
     for i, row in enumerate(rows, start=2):
         if _row_has_error(i, errors):
             continue
 
-        date = (row.get("date") or "").strip()
-        process = (row.get("process") or "").strip()
-        operator = (row.get("operator") or "").strip()
-        note = (row.get("note") or "").strip()
-
-        if not _parse_date_yyyy_mm_dd(date):
-            errors.append(RowError(i, "date_invalid: expected YYYY-MM-DD", row))
+        norm_row, norm_errors = normalize_row(i, row)
+        if norm_errors:
+            errors.extend(norm_errors)
             continue
-
-        minutes_raw = (row.get("minutes") or "").strip()
-        m = _parse_minutes(minutes_raw)
-        if m is not None and m != -1:
-            if m <= 0:
-                errors.append(RowError(i, "minutes_invalid: must be integer > 0", row))
-                continue
-            normalized.append(NormalizedRow(date, process, operator, m, note))
-            continue
-        if m == -1:
-            errors.append(RowError(i, "minutes_invalid: not an integer", row))
-            continue
-
-        # start/end 方式（validate_time_rules 済みなので形式はOKのはず）
-        start = (row.get("start") or "").strip()
-        end = (row.get("end") or "").strip()
-        smin = _parse_hhmm_to_minutes(start)
-        emin = _parse_hhmm_to_minutes(end)
-        if smin is None or emin is None:
-            errors.append(RowError(i, "time_invalid: expected HH:MM", row))
-            continue
-        diff = emin - smin
-        if diff <= 0:
-            errors.append(RowError(i, "time_order_invalid: end must be after start", row))
-            continue
-
-        normalized.append(NormalizedRow(date, process, operator, diff, note))
+        
+        if norm_row is not None:
+            normalized.append(norm_row)
 
     # errors は常に出す（空でもOK）
     write_errors_csv(errors_csv, errors)
