@@ -25,7 +25,7 @@ def run_build(input_csv: Path, out_dir: Path) -> int:
 
     logger.info(f"build: start input={input_csv} out_dir={out_dir}")
 
-    rows = read_csv_utf8(input_csv)
+    _, rows = read_csv_utf8(input_csv)
 
     # 既存validate（必須列＋時間ルール）
     errors: list[RowError] = []
