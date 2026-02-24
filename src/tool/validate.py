@@ -1,11 +1,11 @@
+# src/tool/validate.py
 from __future__ import annotations
 
 import csv
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-
-import logging
 
 logger = logging.getLogger("worklog_tool")
 
@@ -14,27 +14,41 @@ REQUIRED_COLUMNS = ["date", "process", "operator"]
 
 @dataclass
 class RowError:
-    row_number: int           # CSVの行番号（ヘッダー=1として、データは2〜）
+    row_number: int  # CSVの行番号（ヘッダー=1として、データは2〜。file_errorは0）
     reason: str
     raw: dict[str, str]
 
 
-def read_csv_utf8(path: Path) -> list[dict[str, str]]:
+def read_csv_utf8(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     with path.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
             raise ValueError("CSV has no header row.")
-        return list(reader)
+        fieldnames = [h.strip() for h in reader.fieldnames]
+        return fieldnames, list(reader)
+
+
+def validate_header(fieldnames: list[str]) -> list[RowError]:
+    missing = [c for c in REQUIRED_COLUMNS if c not in fieldnames]
+    if not missing:
+        return []
+    return [
+        RowError(
+            row_number=0,
+            reason=f"file_error: missing_columns: {','.join(missing)}",
+            raw={"header": ",".join(fieldnames)},
+        )
+    ]
 
 
 def validate_required_columns(rows: list[dict[str, str]]) -> list[RowError]:
     errors: list[RowError] = []
-    # DictReader は存在しない列でも key を作らないので、各行で get() する
     for i, row in enumerate(rows, start=2):
         missing = [c for c in REQUIRED_COLUMNS if not (row.get(c) or "").strip()]
         if missing:
             errors.append(RowError(i, f"missing_required: {','.join(missing)}", row))
     return errors
+
 
 def validate_time_rules(rows: list[dict[str, str]]) -> list[RowError]:
     """
@@ -55,37 +69,25 @@ def validate_time_rules(rows: list[dict[str, str]]) -> list[RowError]:
         m = int(mm)
         return 0 <= h <= 23 and 0 <= m <= 59
 
-    def parse_pos_int(s: str) -> int | None:
-        s = (s or "").strip()
-        if not s:
-            return None
-        if not s.isdigit():
-            return -1
-        v = int(s)
-        return v
-
     for i, row in enumerate(rows, start=2):
         start = (row.get("start") or "").strip()
         end = (row.get("end") or "").strip()
         minutes_raw = (row.get("minutes") or "").strip()
 
-        has_start = bool(start)
-        has_end = bool(end)
-        has_minutes = bool(minutes_raw)
-
-        # minutes があれば minutes方式を優先（start/endが多少入っていても後で調整可能）
-        if has_minutes:
-            v = parse_pos_int(minutes_raw)
-            if v is None:
-                pass
-            elif v <= 0:
-                errors.append(RowError(i, "minutes_invalid: must be integer > 0", row))
-            return_minutes_invalid = False
-            if v == -1:
+        # minutes方式があれば優先
+        if minutes_raw:
+            if not minutes_raw.isdigit():
                 errors.append(RowError(i, "minutes_invalid: not an integer", row))
+                continue
+            v = int(minutes_raw)
+            if v <= 0:
+                errors.append(RowError(i, "minutes_invalid: must be integer > 0", row))
             continue
 
-        # minutes が無い場合は start/end の両方が必要
+        has_start = bool(start)
+        has_end = bool(end)
+
+        # minutesが無い場合は start/end の両方が必要
         if has_start or has_end:
             if not (has_start and has_end):
                 errors.append(RowError(i, "time_incomplete: need both start and end", row))
@@ -117,14 +119,21 @@ def run_validate(input_csv: Path, errors_csv: Path) -> int:
     logger.info(f"validate: start input={input_csv}")
 
     try:
-        rows = read_csv_utf8(input_csv)
+        fieldnames, rows = read_csv_utf8(input_csv)
+
+        header_errors = validate_header(fieldnames)
+        if header_errors:
+            write_errors_csv(errors_csv, header_errors)
+            logger.info(f"validate: header_error errors={len(header_errors)} errors_csv={errors_csv}")
+            print(f"INVALID: header_error -> {errors_csv}")
+            logger.info("validate: finished status=INVALID")
+            return 2
 
         errors: list[RowError] = []
         errors.extend(validate_required_columns(rows))
         errors.extend(validate_time_rules(rows))
 
         write_errors_csv(errors_csv, errors)
-
         logger.info(f"validate: rows={len(rows)} errors={len(errors)} errors_csv={errors_csv}")
 
         if errors:
@@ -137,7 +146,6 @@ def run_validate(input_csv: Path, errors_csv: Path) -> int:
         return 0
 
     except Exception as e:
-        # ファイルレベルの致命的エラーでも落とさない
         file_error = RowError(
             row_number=0,
             reason=f"file_error: {type(e).__name__}: {e}",
@@ -148,5 +156,3 @@ def run_validate(input_csv: Path, errors_csv: Path) -> int:
         logger.exception(f"validate: file_error input={input_csv}")
         print(f"INVALID: file_error -> {errors_csv}")
         return 2
-
-
